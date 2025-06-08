@@ -4,9 +4,9 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { StatsCard } from "@/components/dashboard/stats-card";
 import { ChartCard } from "@/components/dashboard/chart-card";
-import { BarChart as LucideBarChart, LineChart as LucideLineChart, PieChartIcon, Users, Briefcase, CheckCircle2 } from "lucide-react"; // Renamed to avoid conflict
+import { BarChart as LucideBarChart, LineChart as LucideLineChartIcon, PieChartIcon, Users, Briefcase, CheckCircle2 } from "lucide-react"; // Renamed LucideLineChart to LucideLineChartIcon
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
-import { Bar, Line, Pie, PieChart as RechartsPieChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, Legend as RechartsLegend, ResponsiveContainer, Cell } from "recharts"; // Added Cell import
+import { Bar, Line, Pie, PieChart as RechartsPieChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, Legend as RechartsLegend, ResponsiveContainer, Cell, LineChart, BarChart } from "recharts"; // Added LineChart, BarChart imports
 
 const timeToFillData = [
   { month: "Jan", days: 30 }, { month: "Feb", days: 25 }, { month: "Mar", days: 28 },
@@ -56,7 +56,7 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6 md:mb-8">
         <StatsCard title="Active Job Openings" value="12" icon={Briefcase} description="+2 since last month" />
         <StatsCard title="Total Candidates" value="1,250" icon={Users} description="In pipeline across all roles" />
-        <StatsCard title="Avg. Time to Fill" value="28 days" icon={LucideBarChart} description="-5 days vs. last quarter" />
+        <StatsCard title="Avg. Time to Fill" value="28 days" icon={LucideLineChartIcon} description="-5 days vs. last quarter" />
         <StatsCard title="Hires This Month" value="5" icon={CheckCircle2} description="On track for quarterly goal" />
       </div>
 
@@ -64,13 +64,13 @@ export default function DashboardPage() {
         <ChartCard title="Time to Fill (Last 6 Months)" description="Average number of days to fill a position.">
           <ChartContainer config={chartConfigTimeToFill} className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LucideLineChart data={timeToFillData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+              <LineChart data={timeToFillData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
                 <YAxis tickLine={false} axisLine={false} tickMargin={8} />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Line type="monotone" dataKey="days" stroke="var(--color-days)" strokeWidth={2} dot={true} />
-              </LucideLineChart>
+              </LineChart>
             </ResponsiveContainer>
           </ChartContainer>
         </ChartCard>
@@ -78,7 +78,7 @@ export default function DashboardPage() {
         <ChartCard title="Source ROI & Hires" description="Return on investment and number of hires by source.">
            <ChartContainer config={chartConfigSourceROI} className="h-[300px] w-full">
              <ResponsiveContainer width="100%" height="100%">
-              <LucideBarChart data={sourceROIData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+              <BarChart data={sourceROIData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="source" tickLine={false} axisLine={false} tickMargin={8} />
                 <YAxis yAxisId="left" orientation="left" stroke="var(--color-hires)" tickLine={false} axisLine={false} tickMargin={8}/>
@@ -87,7 +87,7 @@ export default function DashboardPage() {
                 <RechartsLegend content={<ChartLegendContent />} />
                 <Bar yAxisId="left" dataKey="hires" fill="var(--color-hires)" radius={4} />
                 <Bar yAxisId="right" dataKey="roi" fill="var(--color-roi)" radius={4} />
-              </LucideBarChart>
+              </BarChart>
             </ResponsiveContainer>
           </ChartContainer>
         </ChartCard>
