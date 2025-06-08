@@ -46,11 +46,7 @@ const prompt = ai.definePrompt({
   input: {schema: ScoreResumesInputSchema},
   output: {schema: ScoreResumesOutputSchema},
   prompt: `You are an expert resume screening AI. Your task is to evaluate resumes against a provided job description.
-For EACH resume submitted, you MUST return a JSON object containing a 'score', a 'reason' for that score, and the original 'resumeDataUri'.
-
-First, determine the 'score'. The 'score' MUST be a number between 0 and 100. This field is MANDATORY for every resume.
-Then, provide a 'reason'. The 'reason' MUST be a string explaining the score. This field is MANDATORY for every resume.
-Finally, include the 'resumeDataUri'. The 'resumeDataUri' MUST be the exact data URI string provided for that resume in the input. This field is MANDATORY.
+For EACH resume submitted, you MUST return a JSON object.
 
 Job Description:
 {{{jobDescription}}}
@@ -62,29 +58,38 @@ Resumes to process:
 {{/each}}
 
 OUTPUT FORMAT SPECIFICATION:
-Your entire output MUST be a single valid JSON array.
-Each element in the array MUST be a JSON object structured EXACTLY as follows:
+Your entire output MUST be a single valid JSON array. Each object in the array corresponds to one resume and MUST contain the following three fields in this exact order:
+1.  \`score\`: A number between 0 and 100. This field is MANDATORY.
+2.  \`reason\`: A string explaining the score. This field is MANDATORY.
+3.  \`resumeDataUri\`: The original data URI of the resume as provided in the input. This field is MANDATORY.
+
+Example of the JSON structure for a single resume object:
 {
-  "score": <NUMBER_0_TO_100_MANDATORY>,
-  "reason": "<STRING_EXPLANATION_MANDATORY>",
-  "resumeDataUri": "<ORIGINAL_INPUT_DATA_URI_MANDATORY>"
+  "score": 85,
+  "reason": "Detailed explanation for the score, referencing specific skills from the resume and how they align or misalign with the job description.",
+  "resumeDataUri": "data:application/pdf;base64,..."
 }
 
-Example for two resumes input:
+If there are multiple resumes, your output will be an array of such objects:
 [
   {
-    "score": 85,
-    "reason": "Strong alignment with required skills and experience.",
+    "score": 90,
+    "reason": "Excellent match for resume 1. Strong skills in X, Y, and Z as per job description.",
     "resumeDataUri": "data_uri_for_resume_1_from_input"
   },
   {
-    "score": 60,
-    "reason": "Some relevant experience but lacks depth in key areas.",
+    "score": 75,
+    "reason": "Good fit for resume 2. Relevant experience in A, but lacks B.",
     "resumeDataUri": "data_uri_for_resume_2_from_input"
   }
 ]
 
-CRITICAL FINAL INSTRUCTION: For every single resume provided in the input, your output object for that resume MUST include the 'score' field, and its value MUST be a number. DO NOT OMIT THE 'score' FIELD UNDER ANY CIRCUMSTANCES.`,
+CRITICALLY IMPORTANT:
+- The 'score' field MUST be present in every JSON object you return for each resume.
+- The 'score' field MUST be a numerical value (e.g., 78, not "78").
+- The 'reason' field MUST provide a justification for the score.
+- The 'resumeDataUri' MUST be the exact string provided in the input for that resume.
+DO NOT OMIT THE 'score' FIELD UNDER ANY CIRCUMSTANCES. Ensure every resume object has a 'score'.`,
 });
 
 const scoreResumesFlow = ai.defineFlow(
@@ -98,6 +103,3 @@ const scoreResumesFlow = ai.defineFlow(
     return output!;
   }
 );
-
-
-    
