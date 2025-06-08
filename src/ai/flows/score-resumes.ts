@@ -30,9 +30,9 @@ const ScoreResumesOutputSchema = z.array(
     resumeDataUri: z
       .string()
       .describe(
-        "The resume's data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
+        "The resume's data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'. This should be the same as the input URI for the resume being scored."
       ),
-    score: z.number().describe('The score of the resume, from 0 to 100.'),
+    score: z.number().describe('The score of the resume, from 0 to 100. This field is mandatory.'),
     reason: z.string().describe('The reason for the score.'),
   })
 );
@@ -46,7 +46,27 @@ const prompt = ai.definePrompt({
   name: 'scoreResumesPrompt',
   input: {schema: ScoreResumesInputSchema},
   output: {schema: ScoreResumesOutputSchema},
-  prompt: `You are an expert recruiter specializing in scoring resumes based on job descriptions.\n\nYou will use this information to score the resumes, and provide a reason for the score. The score should be from 0 to 100.\n\nJob Description: {{{jobDescription}}}\n\nResumes:\n{{#each resumeDataUris}}\n  Resume: {{media url=this}}\n{{/each}}`,
+  prompt: `You are an expert recruiter specializing in scoring resumes based on job descriptions.
+You will be provided with a job description and a list of resumes (as data URIs).
+For each resume, you must evaluate it against the job description and produce a score and a reason.
+
+Job Description:
+{{{jobDescription}}}
+
+Resumes to score:
+{{#each resumeDataUris}}
+  Resume ({{@index}}):
+  Data URI: {{this}}
+  Content: {{media url=this}}
+{{/each}}
+
+Your output MUST be a JSON array. Each element in the array must be an object corresponding to one of the input resumes.
+Each object MUST contain the following fields:
+- \`resumeDataUri\`: The exact data URI of the resume, as provided in the input for that resume.
+- \`score\`: A numerical score from 0 to 100 (inclusive), representing the resume's match to the job description. This field is MANDATORY.
+- \`reason\`: A brief explanation for the assigned score.
+
+Please ensure the 'score' field is present and correctly formatted for every resume processed.`,
 });
 
 const scoreResumesFlow = ai.defineFlow(
@@ -60,3 +80,4 @@ const scoreResumesFlow = ai.defineFlow(
     return output!;
   }
 );
+
