@@ -45,50 +45,46 @@ const prompt = ai.definePrompt({
   name: 'scoreResumesPrompt',
   input: {schema: ScoreResumesInputSchema},
   output: {schema: ScoreResumesOutputSchema},
-  prompt: `You are an expert recruiter specializing in scoring resumes against a job description.
-You will be provided with a jobDescription and a list of resumes (as data URIs).
-For EACH resume provided in the 'resumeDataUris' input array, you MUST evaluate it against the 'jobDescription' and produce a corresponding object in the output JSON array.
+  prompt: `You are an expert resume screening AI. Your task is to evaluate resumes against a provided job description.
+For EACH resume submitted, you MUST return a JSON object containing a 'score', a 'reason' for that score, and the original 'resumeDataUri'.
+
+First, determine the 'score'. The 'score' MUST be a number between 0 and 100. This field is MANDATORY for every resume.
+Then, provide a 'reason'. The 'reason' MUST be a string explaining the score. This field is MANDATORY for every resume.
+Finally, include the 'resumeDataUri'. The 'resumeDataUri' MUST be the exact data URI string provided for that resume in the input. This field is MANDATORY.
 
 Job Description:
 {{{jobDescription}}}
 
-Resumes to score:
+Resumes to process:
 {{#each resumeDataUris}}
-  Resume ({{@index}}):
-  Data URI: {{this}}
-  Content: {{media url=this}}
+  Resume to score (Data URI): {{this}}
+  Resume Content: {{media url=this}}
 {{/each}}
 
-CRITICAL INSTRUCTIONS FOR OUTPUT FORMAT:
-Your output MUST be a valid JSON array.
-EACH object in this array represents a single resume and MUST contain the following fields:
-1. \`resumeDataUri\`: STRING - The exact data URI of the resume, exactly as it was provided in the input for that resume. This field MUST be present.
-2. \`score\`: NUMBER - A numerical score from 0 to 100 (inclusive), representing the resume's match to the job description. This field is ABSOLUTELY MANDATORY and MUST be a number for every resume processed. DO NOT OMIT THIS FIELD.
-3. \`reason\`: STRING - A brief explanation for the assigned score. This field MUST be present.
-
-Example of a single object within the output array:
+OUTPUT FORMAT SPECIFICATION:
+Your entire output MUST be a single valid JSON array.
+Each element in the array MUST be a JSON object structured EXACTLY as follows:
 {
-  "resumeDataUri": "data:application/pdf;base64,JVBERi0xLjc...",
-  "score": 75,
-  "reason": "Good match for skills X and Y, but lacks experience in Z."
+  "score": <NUMBER_0_TO_100_MANDATORY>,
+  "reason": "<STRING_EXPLANATION_MANDATORY>",
+  "resumeDataUri": "<ORIGINAL_INPUT_DATA_URI_MANDATORY>"
 }
 
-If multiple resumes are provided in the input, your output JSON array should contain an object for each one, and EACH of those objects MUST include the 'score' field as a number.
-For example, if two resumes are input, the output should look like:
+Example for two resumes input:
 [
   {
-    "resumeDataUri": "data_uri_for_resume_1",
-    "score": 80,
-    "reason": "Reason for score of resume 1..."
+    "score": 85,
+    "reason": "Strong alignment with required skills and experience.",
+    "resumeDataUri": "data_uri_for_resume_1_from_input"
   },
   {
-    "resumeDataUri": "data_uri_for_resume_2",
-    "score": 65,
-    "reason": "Reason for score of resume 2..."
+    "score": 60,
+    "reason": "Some relevant experience but lacks depth in key areas.",
+    "resumeDataUri": "data_uri_for_resume_2_from_input"
   }
 ]
 
-Ensure every resume processed has a 'score' field that is a number. Do not omit the 'score' field under any circumstances for any resume.`,
+CRITICAL FINAL INSTRUCTION: For every single resume provided in the input, your output object for that resume MUST include the 'score' field, and its value MUST be a number. DO NOT OMIT THE 'score' FIELD UNDER ANY CIRCUMSTANCES.`,
 });
 
 const scoreResumesFlow = ai.defineFlow(
@@ -102,3 +98,6 @@ const scoreResumesFlow = ai.defineFlow(
     return output!;
   }
 );
+
+
+    
