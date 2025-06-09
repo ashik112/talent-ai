@@ -49,18 +49,24 @@ export type ScoreResumesOutput = z.infer<typeof ScoreResumesOutputSchema>;
 const CHUNK_SIZE = 5; // Process up to 5 resumes at a time in a single batch call to the LLM
 const PARALLEL_THRESHOLD = 3; // Process up to 3 resumes individually in parallel
 
-export async function scoreResumes(input: ScoreResumesInput): Promise<ScoreResumesOutput> {
+export async function scoreResumes(input: ScoreResumesInput): Promise<ScoreResumesOutput | { error: string }> {
+  console.log(`[scoreResumes flow] Received request to score ${input.resumeDataUris.length} resumes.`);
+  console.time("[scoreResumes flow] Total execution time");
+
   const { jobDescription, resumeDataUris } = input;
   const numResumes = resumeDataUris.length;
   const allResults: ScoreResumesOutput = [];
 
   if (numResumes === 0) {
+    console.log("[scoreResumes flow] No resumes provided, returning empty array.");
+    console.timeEnd("[scoreResumes flow] Total execution time");
     return [];
   }
 
   // If PARALLEL_THRESHOLD or fewer resumes, process them individually in parallel for potentially faster individual feedback.
   if (numResumes <= PARALLEL_THRESHOLD) {
-    console.log(`Processing ${numResumes} resumes individually in parallel.`);
+    console.log(`[scoreResumes flow] Processing ${numResumes} resumes individually in parallel (threshold: ${PARALLEL_THRESHOLD}).`);
+    console.time("[scoreResumes flow] Parallel individual processing time");
     const promises = resumeDataUris.map(resumeDataUri =>
       scoreSingleResumeFlow({
         jobDescription: jobDescription,
@@ -69,41 +75,52 @@ export async function scoreResumes(input: ScoreResumesInput): Promise<ScoreResum
     );
     try {
         const individualResults = await Promise.all(promises);
+        console.timeEnd("[scoreResumes flow] Parallel individual processing time");
+        console.log(`[scoreResumes flow] Finished parallel individual processing. Results count: ${individualResults.length}`);
+        console.timeEnd("[scoreResumes flow] Total execution time");
         return individualResults;
     } catch (error) {
-        console.error('Error processing resumes individually in parallel:', error);
-        return resumeDataUris.map(uri => ({
-            resumeDataUri: uri,
-            score: 0, // Error score
-            reason: `Failed during parallel individual processing: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        }));
+        console.error('[scoreResumes flow] Error processing resumes individually in parallel:', error);
+        console.timeEnd("[scoreResumes flow] Parallel individual processing time");
+        console.timeEnd("[scoreResumes flow] Total execution time");
+        return { error: `Failed during parallel individual processing: ${error instanceof Error ? error.message : 'Unknown error'}`};
     }
   }
 
   // For more than PARALLEL_THRESHOLD resumes, process in chunks using the batch flow.
-  console.log(`Processing ${numResumes} resumes in chunks of up to ${CHUNK_SIZE}.`);
+  console.log(`[scoreResumes flow] Processing ${numResumes} resumes in chunks of up to ${CHUNK_SIZE}.`);
   for (let i = 0; i < numResumes; i += CHUNK_SIZE) {
     const chunk = resumeDataUris.slice(i, i + CHUNK_SIZE);
+    const chunkNumber = Math.floor(i / CHUNK_SIZE) + 1;
+    const totalChunks = Math.ceil(numResumes / CHUNK_SIZE);
+
     if (chunk.length > 0) {
-      console.log(`Processing chunk: ${Math.floor(i / CHUNK_SIZE) + 1} of ${Math.ceil(numResumes / CHUNK_SIZE)}, size: ${chunk.length}`);
+      console.log(`[scoreResumes flow] Processing chunk: ${chunkNumber} of ${totalChunks}, size: ${chunk.length}`);
+      console.time(`[scoreResumes flow] Chunk ${chunkNumber} processing time`);
       try {
-        const chunkResults = await scoreResumesBatchProcessingFlow({ // Renamed flow for clarity
+        const chunkResults = await scoreResumesBatchProcessingFlow({
           jobDescription: jobDescription,
           resumeDataUris: chunk,
         });
         allResults.push(...chunkResults);
+        console.timeEnd(`[scoreResumes flow] Chunk ${chunkNumber} processing time`);
+        console.log(`[scoreResumes flow] Finished processing chunk ${chunkNumber}. Results in chunk: ${chunkResults.length}`);
       } catch (error) {
-        console.error(`Critical error processing chunk starting at index ${i}:`, error);
+        console.error(`[scoreResumes flow] Critical error processing chunk ${chunkNumber} (starting at index ${i}):`, error);
+        console.timeEnd(`[scoreResumes flow] Chunk ${chunkNumber} processing time`);
+        // We add fallback results for the failed chunk to maintain overall structure if desired,
+        // or we could throw and fail the whole operation. For now, returning error objects for failed items.
         const fallbackChunkResults = chunk.map(uri => ({
             resumeDataUri: uri,
-            score: 0, // Error score
-            reason: `Failed to process this resume in batch chunk due to a system error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            score: 0, 
+            reason: `Failed to process this resume in batch chunk ${chunkNumber} due to a system error: ${error instanceof Error ? error.message : 'Unknown error'}`,
         }));
         allResults.push(...fallbackChunkResults);
       }
     }
   }
-  console.log(`Finished processing all ${numResumes} resumes. Total results generated: ${allResults.length}`);
+  console.log(`[scoreResumes flow] Finished processing all ${numResumes} resumes. Total results generated: ${allResults.length}`);
+  console.timeEnd("[scoreResumes flow] Total execution time");
   return allResults;
 }
 
@@ -138,30 +155,39 @@ const scoreSingleResumeFlow = ai.defineFlow(
     outputSchema: ScoreSingleResumeOutputSchema,
   },
   async (input: ScoreSingleResumeInput): Promise<ScoreSingleResumeOutput> => {
+    const shortUri = input.resumeDataUri.substring(0,70) + '...';
+    console.log(`[scoreSingleResumeFlow] Starting for resume: ${shortUri}`);
+    console.time(`[scoreSingleResumeFlow] LLM call for ${shortUri}`);
     try {
       const {output} = await singleResumePrompt(input);
+      console.timeEnd(`[scoreSingleResumeFlow] LLM call for ${shortUri}`);
       
       if (!output || typeof output.score !== 'number' || typeof output.reason !== 'string' || typeof output.resumeDataUri !== 'string') {
-        console.warn('Invalid or incomplete AI response for single resume. Output:', output);
+        console.warn(`[scoreSingleResumeFlow] Invalid or incomplete AI response for single resume ${shortUri}. Output:`, output);
         const score = (output && typeof output.score === 'number') ? output.score : 0;
         const reason = (output && typeof output.reason === 'string') ? output.reason : 'AI response was incomplete or malformed.';
+        // Construct and return an error-like object or throw, ensuring the promise resolves to the defined output type.
+        // For now, we'll return a "failed" score as per previous logic.
         return {
-          resumeDataUri: input.resumeDataUri, // Fallback to input URI
+          resumeDataUri: input.resumeDataUri, 
           score: Math.max(0, Math.min(100, Math.round(score))),
           reason: reason,
         };
       }
       
+      console.log(`[scoreSingleResumeFlow] Successfully processed resume: ${shortUri}`);
       return {
-        resumeDataUri: output.resumeDataUri, // Prefer output URI
+        resumeDataUri: output.resumeDataUri, 
         score: Math.max(0, Math.min(100, Math.round(output.score))),
         reason: output.reason
       };
     } catch (error) {
-      console.error(`Single resume scoring flow failed for URI starting with ${input.resumeDataUri.substring(0,50)}...:`, error);
+      console.timeEnd(`[scoreSingleResumeFlow] LLM call for ${shortUri}`);
+      console.error(`[scoreSingleResumeFlow] Failed for URI ${shortUri}:`, error);
+      // Ensure the return type matches ScoreSingleResumeOutput even in error cases.
       return {
         resumeDataUri: input.resumeDataUri,
-        score: 0, // Error score
+        score: 0, 
         reason: `Error during single resume analysis: ${error instanceof Error ? error.message : 'Unknown error'}. Please review manually.`
       };
     }
@@ -171,8 +197,8 @@ const scoreSingleResumeFlow = ai.defineFlow(
 // Prompt for scoring a batch of resumes
 const scoreResumesBatchPrompt = ai.definePrompt({
   name: 'scoreResumesBatchPrompt',
-  input: {schema: ScoreResumesInputSchema}, // Expects an array of resumeDataUris
-  output: {schema: ScoreResumesOutputSchema}, // Expects an array of results
+  input: {schema: ScoreResumesInputSchema}, 
+  output: {schema: ScoreResumesOutputSchema}, 
   prompt: `You are an expert resume screener. Your task is to score EACH of the provided resumes against the given job description.
 For EACH resume, you MUST determine a score and a reason.
 Return a valid JSON array, where EACH object in the array corresponds to one resume and MUST contain these three fields, in this exact order:
@@ -205,47 +231,57 @@ const scoreResumesBatchProcessingFlow = ai.defineFlow(
     outputSchema: ScoreResumesOutputSchema,
   },
   async (input: ScoreResumesInput): Promise<ScoreResumesOutput> => {
+    const firstUriShort = input.resumeDataUris.length > 0 ? input.resumeDataUris[0].substring(0,50) + '...' : 'N/A';
+    console.log(`[scoreResumesBatchProcessingFlow] Starting for a batch of ${input.resumeDataUris.length} resumes. First URI starts: ${firstUriShort}`);
+    console.time(`[scoreResumesBatchProcessingFlow] LLM call for batch starting with ${firstUriShort}`);
     try {
-      const {output} = await scoreResumesBatchPrompt(input); // Uses the batch prompt
+      const {output} = await scoreResumesBatchPrompt(input); 
+      console.timeEnd(`[scoreResumesBatchProcessingFlow] LLM call for batch starting with ${firstUriShort}`);
       
       if (!output || !Array.isArray(output)) {
-        console.warn('AI response for batch was not a valid array. Input URIs count:', input.resumeDataUris.length, 'Output:', output);
-        throw new Error('AI response for batch was not a valid array');
+        console.warn('[scoreResumesBatchProcessingFlow] AI response for batch was not a valid array. Input URIs count:', input.resumeDataUris.length, 'Output:', output);
+        // Fallback: return an array of error objects, one for each input URI
+        return input.resumeDataUris.map(uri => ({
+            resumeDataUri: uri,
+            score: 0,
+            reason: 'AI response for batch was not a valid array or was empty.'
+        }));
       }
       
       const validatedResults: ScoreResumesOutput = [];
       
-      // Match results to input URIs to ensure correctness and completeness
       for (const inputUri of input.resumeDataUris) {
         const aiResult = output.find(o => o.resumeDataUri === inputUri);
 
         if (aiResult && typeof aiResult.score === 'number' && typeof aiResult.reason === 'string') {
           validatedResults.push({
-            resumeDataUri: inputUri, // Ensure we use the input URI
+            resumeDataUri: inputUri, 
             score: Math.max(0, Math.min(100, Math.round(aiResult.score))),
             reason: aiResult.reason
           });
         } else {
-          console.warn(`Missing or invalid fields for resume ${inputUri.substring(0,50)}... in batch. AI Result found:`, aiResult, 'Full AI output for batch:', output);
+          console.warn(`[scoreResumesBatchProcessingFlow] Missing or invalid fields for resume ${inputUri.substring(0,50)}... in batch. AI Result found:`, aiResult, 'Full AI output for batch:', output);
           validatedResults.push({
             resumeDataUri: inputUri,
-            score: 0, // Error score
+            score: 0, 
             reason: 'AI response for this resume in batch was incomplete, malformed, or URI mismatch.'
           });
         }
       }
       
-      // If AI returned more or fewer items than expected, log it.
       if (output.length !== input.resumeDataUris.length) {
-          console.warn(`AI returned ${output.length} items for a batch of ${input.resumeDataUris.length} resumes. Results were mapped to input URIs.`);
+          console.warn(`[scoreResumesBatchProcessingFlow] AI returned ${output.length} items for a batch of ${input.resumeDataUris.length} resumes. Results were mapped to input URIs.`);
       }
-
+      
+      console.log(`[scoreResumesBatchProcessingFlow] Successfully processed batch. Validated results count: ${validatedResults.length}`);
       return validatedResults;
+
     } catch (error) {
-      console.error(`Batch scoring flow failed for chunk with URIs starting: ${input.resumeDataUris.map(u => u.substring(0,30) + '...').join(', ')}:`, error);
+      console.timeEnd(`[scoreResumesBatchProcessingFlow] LLM call for batch starting with ${firstUriShort}`);
+      console.error(`[scoreResumesBatchProcessingFlow] Failed for batch starting with ${firstUriShort}:`, error);
       return input.resumeDataUris.map(resumeDataUri => ({
         resumeDataUri,
-        score: 0, // Error score
+        score: 0, 
         reason: `Error during batch resume analysis for this chunk: ${error instanceof Error ? error.message : 'Unknown error'}. Please review manually.`
       }));
     }
