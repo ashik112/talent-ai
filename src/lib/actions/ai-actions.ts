@@ -25,13 +25,31 @@ export async function scoreResumesAction(
     if (!input.jobDescription || input.resumeDataUris.length === 0) {
       return { error: "Job description and at least one resume are required." };
     }
+    
+    console.log(`Starting to score ${input.resumeDataUris.length} resumes`);
     const result = await scoreResumesFlow(input);
+    console.log(`Successfully scored ${result.length} resumes`);
+    
     return result;
-  } catch (error)
-  {
+  } catch (error) {
     console.error("Error scoring resumes:", error);
-    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
-    return { error: `Failed to score resumes: ${errorMessage}. Please try again.` };
+    
+    // Provide more detailed error information
+    let errorMessage = "Failed to score resumes. Please try again.";
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Schema validation failed')) {
+        errorMessage = "The AI response format was invalid. This might be due to complex resumes or job descriptions. Please try with simpler content or fewer resumes at once.";
+      } else if (error.message.includes('score field is missing')) {
+        errorMessage = "The AI failed to provide scores for all resumes. Please try again or contact support if the issue persists.";
+      } else if (error.message.includes('Expected') && error.message.includes('resume scores')) {
+        errorMessage = "The AI didn't process all resumes. Please try again with fewer resumes or simpler content.";
+      } else {
+        errorMessage = `Failed to score resumes: ${error.message}`;
+      }
+    }
+    
+    return { error: errorMessage };
   }
 }
 

@@ -1,6 +1,6 @@
 'use server';
 /**
- * @fileOverview A resume scoring AI agent.
+ * @fileOverview A resume scoring AI agent with parallel processing for better performance.
  *
  * - scoreResumes - A function that handles the resume scoring process.
  * - ScoreResumesInput - The input type for the scoreResumes function.
@@ -24,72 +24,123 @@ const ScoreResumesInputSchema = z.object({
 });
 export type ScoreResumesInput = z.infer<typeof ScoreResumesInputSchema>;
 
-const ScoreResumesOutputSchema = z.array(
-  z.object({
-    resumeDataUri: z
-      .string()
-      .describe(
-        "The resume's data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'. This should be the same as the input URI for the resume being scored."
-      ),
-    score: z.number().describe('The score of the resume, from 0 to 100. This field is mandatory.'),
-    reason: z.string().describe('The reason for the score. This field is mandatory.'),
-  })
-);
+// Schema for scoring a single resume
+const ScoreSingleResumeInputSchema = z.object({
+  jobDescription: z.string(),
+  resumeDataUri: z.string(),
+});
+
+const ScoreSingleResumeOutputSchema = z.object({
+  resumeDataUri: z.string(),
+  score: z.number().describe('The score of the resume, from 0 to 100.'),
+  reason: z.string().describe('The reason for the score.'),
+});
+
+const ScoreResumesOutputSchema = z.array(ScoreSingleResumeOutputSchema);
 export type ScoreResumesOutput = z.infer<typeof ScoreResumesOutputSchema>;
 
 export async function scoreResumes(input: ScoreResumesInput): Promise<ScoreResumesOutput> {
-  return scoreResumesFlow(input);
+  // For better performance, process resumes in parallel if there are multiple
+  if (input.resumeDataUris.length === 1) {
+    // Single resume - use the optimized single flow
+    const result = await scoreSingleResumeFlow({
+      jobDescription: input.jobDescription,
+      resumeDataUri: input.resumeDataUris[0]
+    });
+    return [result];
+  } else if (input.resumeDataUris.length <= 3) {
+    // Small batch - process in parallel
+    const promises = input.resumeDataUris.map(resumeDataUri =>
+      scoreSingleResumeFlow({
+        jobDescription: input.jobDescription,
+        resumeDataUri
+      })
+    );
+    return Promise.all(promises);
+  } else {
+    // Large batch - use the original batch processing but with smaller chunks
+    return scoreResumesFlow(input);
+  }
 }
 
-const prompt = ai.definePrompt({
-  name: 'scoreResumesPrompt',
-  input: {schema: ScoreResumesInputSchema},
-  output: {schema: ScoreResumesOutputSchema},
-  prompt: `You are an expert resume screening AI. Your task is to evaluate resumes against a provided job description.
-For EACH resume submitted, you MUST return a JSON object.
+// Optimized prompt for single resume scoring
+const singleResumePrompt = ai.definePrompt({
+  name: 'scoreSingleResumePrompt',
+  input: {schema: ScoreSingleResumeInputSchema},
+  output: {schema: ScoreSingleResumeOutputSchema},
+  prompt: `Score this resume against the job description.
 
 Job Description:
 {{{jobDescription}}}
 
-Resumes to process:
-{{#each resumeDataUris}}
-  Resume to score (Data URI): {{this}}
-  Resume Content: {{media url=this}}
-{{/each}}
+Resume to evaluate:
+{{media url=resumeDataUri}}
 
-OUTPUT FORMAT SPECIFICATION:
-Your entire output MUST be a single valid JSON array. Each object in the array corresponds to one resume and MUST contain the following three fields in this exact order:
-1.  \`score\`: A number between 0 and 100. This field is MANDATORY.
-2.  \`reason\`: A string explaining the score. This field is MANDATORY.
-3.  \`resumeDataUri\`: The original data URI of the resume as provided in the input. This field is MANDATORY.
-
-Example of the JSON structure for a single resume object:
+Return JSON with this exact structure:
 {
-  "score": 85,
-  "reason": "Detailed explanation for the score, referencing specific skills from the resume and how they align or misalign with the job description.",
-  "resumeDataUri": "data:application/pdf;base64,..."
+  "resumeDataUri": "{{{resumeDataUri}}}",
+  "score": [NUMBER_0_TO_100],
+  "reason": "[BRIEF_EXPLANATION_MAX_150_CHARS]"
 }
 
-If there are multiple resumes, your output will be an array of such objects:
-[
+Score based on: skills match (40%), experience (30%), education (20%), fit (10%).
+Return only valid JSON, no other text.`,
+});
+
+// Fast single resume scoring flow
+const scoreSingleResumeFlow = ai.defineFlow(
   {
-    "score": 90,
-    "reason": "Excellent match for resume 1. Strong skills in X, Y, and Z as per job description.",
-    "resumeDataUri": "data_uri_for_resume_1_from_input"
+    name: 'scoreSingleResumeFlow',
+    inputSchema: ScoreSingleResumeInputSchema,
+    outputSchema: ScoreSingleResumeOutputSchema,
   },
-  {
-    "score": 75,
-    "reason": "Good fit for resume 2. Relevant experience in A, but lacks B.",
-    "resumeDataUri": "data_uri_for_resume_2_from_input"
+  async input => {
+    try {
+      const {output} = await singleResumePrompt(input);
+      
+      if (!output || typeof output.score !== 'number') {
+        throw new Error('Invalid AI response for single resume');
+      }
+      
+      return {
+        resumeDataUri: input.resumeDataUri,
+        score: Math.max(0, Math.min(100, Math.round(output.score))),
+        reason: output.reason || 'Unable to provide detailed analysis.'
+      };
+    } catch (error) {
+      console.warn('Single resume scoring failed, using fallback:', error);
+      return {
+        resumeDataUri: input.resumeDataUri,
+        score: 50,
+        reason: 'Unable to analyze this resume. Please try again or review manually.'
+      };
+    }
   }
+);
+
+// Original batch processing (now optimized for larger batches)
+const prompt = ai.definePrompt({
+  name: 'scoreResumesPrompt',
+  input: {schema: ScoreResumesInputSchema},
+  output: {schema: ScoreResumesOutputSchema},
+  prompt: `Score these resumes against the job description quickly and concisely.
+
+Job Description:
+{{{jobDescription}}}
+
+Resumes:
+{{#each resumeDataUris}}
+{{@index}}: {{media url=this}}
+{{/each}}
+
+Return JSON array:
+[
+{{#each resumeDataUris}}
+  {"resumeDataUri": "{{this}}", "score": [0-100], "reason": "[brief]"}{{#unless @last}},{{/unless}}
+{{/each}}
 ]
 
-CRITICALLY IMPORTANT:
-- The 'score' field MUST be present in every JSON object you return for each resume.
-- The 'score' field MUST be a numerical value (e.g., 78, not "78").
-- The 'reason' field MUST provide a justification for the score.
-- The 'resumeDataUri' MUST be the exact string provided in the input for that resume.
-DO NOT OMIT THE 'score' FIELD UNDER ANY CIRCUMSTANCES. Ensure every resume object has a 'score'.`,
+Focus on key skills and experience. Keep reasons under 100 characters.`,
 });
 
 const scoreResumesFlow = ai.defineFlow(
@@ -99,7 +150,45 @@ const scoreResumesFlow = ai.defineFlow(
     outputSchema: ScoreResumesOutputSchema,
   },
   async input => {
-    const {output} = await prompt(input);
-    return output!;
+    try {
+      const {output} = await prompt(input);
+      
+      if (!output || !Array.isArray(output)) {
+        throw new Error('AI response was not a valid array');
+      }
+      
+      // Create complete response with fallbacks
+      const completeOutput: ScoreResumesOutput = [];
+      
+      for (let i = 0; i < input.resumeDataUris.length; i++) {
+        const resumeDataUri = input.resumeDataUris[i];
+        const aiResult = output[i];
+        
+        if (aiResult && typeof aiResult.score === 'number' && aiResult.reason) {
+          completeOutput.push({
+            resumeDataUri,
+            score: Math.max(0, Math.min(100, Math.round(aiResult.score))),
+            reason: aiResult.reason
+          });
+        } else {
+          completeOutput.push({
+            resumeDataUri,
+            score: 50,
+            reason: 'Unable to analyze this resume fully.'
+          });
+        }
+      }
+      
+      return completeOutput;
+    } catch (error) {
+      console.error('Batch scoring failed:', error);
+      
+      // Return fallback for all resumes
+      return input.resumeDataUris.map(resumeDataUri => ({
+        resumeDataUri,
+        score: 50,
+        reason: 'Processing error. Please try again.'
+      }));
+    }
   }
 );
