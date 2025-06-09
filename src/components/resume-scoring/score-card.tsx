@@ -1,4 +1,5 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 
@@ -16,21 +17,20 @@ export function ScoreCard({ fileName, score, reason, className }: ScoreCardProps
 
   return (
     <Card className={className}>
-      <CardHeader>
-        <div className="flex justify-between items-start">
-          <div>
-            <CardTitle className="text-base font-medium text-foreground mb-1 truncate" title={fileName}>{fileName}</CardTitle>
-            <CardDescription className="text-xs">AI-Generated Fit Score</CardDescription>
-          </div>
-          <Badge variant={badgeVariant} className="text-lg font-headline px-3 py-1">
+      <CardHeader className="py-3 px-4">
+        <div className="flex justify-between items-center gap-2">
+          <CardTitle className="text-sm font-medium text-foreground truncate flex-1" title={fileName}>
+            {fileName}
+          </CardTitle>
+          <Badge variant={badgeVariant} className="text-xs font-semibold px-2 py-0.5">
             {score}%
           </Badge>
         </div>
       </CardHeader>
-      <CardContent>
-        <Progress value={score} className="w-full h-2 mb-3" aria-label={`Score: ${score}%`} />
-        <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3" title={reason}>
-          <span className="font-semibold text-foreground">Reason:</span> {reason}
+      <CardContent className="pt-0 pb-3 px-4 space-y-2">
+        <Progress value={score} className="w-full h-1.5" aria-label={`Score: ${score}%`} />
+        <p className="text-xs text-muted-foreground leading-normal line-clamp-3" title={reason}>
+          <span className="font-semibold text-foreground/90">Reason:</span> {reason}
         </p>
       </CardContent>
     </Card>
